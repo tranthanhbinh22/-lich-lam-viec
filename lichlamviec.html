@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lịch Làm Việc Tuần</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --text: #333;
+      --card: #fff;
+    }
+    body.dark {
+      --bg: #1e1e1e;
+      --text: #eee;
+      --card: #2a2a2a;
+    }
+    body {
+      font-family: 'Segoe UI', 'Roboto', 'Arial', 'Helvetica Neue', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+    }
+    h1, h2, h3 {
+      font-family: 'Segoe UI Semibold', 'Arial', sans-serif;
+    }
+    header, #weekSelect, #total, #chartContainer, #cumulativeStats {
+      padding: 20px;
+      text-align: center;
+      max-width: 1200px;
+      margin: auto;
+    }
+    #weekSelect {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      align-items: center;
+    }
+    input[type="time"], select, input[type="text"], input[type="week"] {
+      padding: 6px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      font-family: 'Roboto', 'Arial', sans-serif;
+    }
+    button {
+      padding: 10px 14px;
+      margin: 4px;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: 'Segoe UI', 'Arial', sans-serif;
+      font-size: 16px;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    .day-block {
+      margin: 15px auto;
+      background: var(--card);
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.05);
+      max-width: 800px;
+      font-family: 'Roboto', 'Arial', sans-serif;
+    }
+    .day-block h3 {
+      margin-top: 0;
+      font-family: 'Segoe UI Semibold', 'Arial', sans-serif;
+    }
+    .ca-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 5px;
+    }
+    .ca-row select, .ca-row input, .ca-row span {
+      flex: 1 1 100px;
+      min-width: 90px;
+      font-family: 'Roboto', 'Arial', sans-serif;
+      font-size: 14px;
+    }
+    #summary {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.4s ease;
+      background: var(--card);
+      margin: 20px auto;
+      padding: 20px;
+      max-width: 800px;
+      border-radius: 6px;
+      font-family: 'Roboto', 'Arial', sans-serif;
+    }
+    #summary.active {
+      max-height: 2000px;
+    }
+    canvas {
+      max-width: 100%;
+      margin: 20px auto;
+    }
+    @media (max-width: 768px) {
+      html, body {
+        font-size: 16px;
+      }
+      .ca-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      #weekSelect {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      button, input, select {
+        width: 100%;
+        font-size: 18px;
+      }
+      .day-block {
+        padding: 10px;
+      }
+    }
+    @media (max-width: 480px) {
+      header, #total, #summary, #chartContainer, #cumulativeStats {
+        padding: 10px;
+      }
+      button {
+        font-size: 16px;
+        padding: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+ <header>
+    <h1>Lịch Làm Việc Tuần</h1>
+  </header>
+  <div id="weekSelect">
+    <label for="employee">Tên nhân viên:</label>
+    <input type="text" id="employee" value="Trần Thanh Bình" placeholder="Nhập tên...">
+    <label for="week">Chọn tuần: </label>
+    <input type="week" id="week" onchange="loadWeekData()">
+    <button onclick="toggleDarkMode()">🌙 Chuyển chế độ</button>
+    <button id="toggleSummaryBtn" onclick="toggleSummary()">📊 Hiện/Ẩn thống kê</button>
+    <button onclick="exportExcel()">📊 Xuất Excel</button>
+    <button onclick="updateTable()">🔄 Cập nhật</button>
+  </div>
+  <div id="workBody"></div>
+  <h3 id="total">Tổng số giờ: 0</h3>
+  <div id="summary">
+    <h2>Thống kê</h2>
+    <p><strong>Ngày làm nhiều nhất:</strong> <span id="maxDay">-</span></p>
+    <p><strong>Ngày làm ít nhất:</strong> <span id="minDay">-</span></p>
+    <p><strong>Trung bình giờ/ngày:</strong> <span id="avgHour">-</span></p>
+    <p><strong>Số ngày có làm việc:</strong> <span id="daysWorked">-</span></p>
+    <p><strong>Cảnh báo:</strong> <span id="warning">-</span></p>
+    <canvas id="historyChart" height="150"></canvas>
+  </div>
+  <div id="chartContainer">
+    <canvas id="barChart"></canvas>
+    <canvas id="pieChart"></canvas>
+  </div>
+  <div id="cumulativeStats">
+    <p><strong>Tổng số tuần ghi nhận:</strong> <span id="totalWeeks">0</span></p>
+    <p><strong>Tổng số giờ toàn bộ lịch sử:</strong> <span id="grandTotal">0</span> giờ</p>
+  </div>
+
+  <script>
+   const schedule = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"];
+    const presets = {
+      weekday: [
+        { label: "", value: "" },
+        { label: "Sáng (6h–10h30)", value: "06:00-10:30" },
+        { label: "Chiều (14h30–19h)", value: "14:30-19:00" },
+        { label: "Tối (19h–23h30)", value: "19:00-23:30" }
+      ],
+      weekend: [
+        { label: "", value: "" },
+        { label: "Sáng (6h–11h)", value: "06:00-11:00" },
+        { label: "Chiều (11h–17h)", value: "11:00-17:00" },
+        { label: "Tối (17h–23h30)", value: "17:00-23:30" }
+      ]
+    };
+
+    function toggleDarkMode() {
+      document.body.classList.toggle('dark');
+    }
+    function toggleSummary() {
+      document.getElementById('summary').classList.toggle('active');
+    }
+    function addCaRow(container, isWeekend) {
+      const row = document.createElement('div');
+      row.className = 'ca-row';
+
+      const select = document.createElement('select');
+      (isWeekend ? presets.weekend : presets.weekday).forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt.value;
+        option.textContent = opt.label;
+        select.appendChild(option);
+      });
+
+      const start = document.createElement('input');
+      start.type = 'time'; start.className = 'start';
+
+      const end = document.createElement('input');
+      end.type = 'time'; end.className = 'end';
+
+      const duration = document.createElement('span');
+      duration.className = 'duration';
+      duration.textContent = '0';
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '🗑';
+      delBtn.onclick = () => row.remove();
+
+      select.onchange = () => {
+        const [s, e] = select.value.split('-');
+        start.value = s || '';
+        end.value = e || '';
+      };
+
+      row.append(select, start, end, duration, delBtn);
+      container.appendChild(row);
+    }
+
+    function generateWorkUI() {
+      const body = document.getElementById('workBody');
+      body.innerHTML = '';
+      schedule.forEach((day, idx) => {
+        const isWeekend = idx >= 5;
+        const div = document.createElement('div');
+        div.className = 'day-block';
+        div.innerHTML = `<h3>${day}</h3>`;
+        const container = document.createElement('div');
+        container.className = 'ca-container';
+        div.appendChild(container);
+        const addBtn = document.createElement('button');
+        addBtn.textContent = '+ Thêm ca';
+        addBtn.onclick = () => addCaRow(container, isWeekend);
+        div.appendChild(addBtn);
+        addCaRow(container, isWeekend);
+        body.appendChild(div);
+      });
+    }
+
+    function updateTable() {
+      let total = 0, workDays = 0, max = -1, min = 999, maxDay = '', minDay = '', warnings = [];
+      let labels = [], data = [];
+      document.querySelectorAll('.day-block').forEach(dayBlock => {
+        const day = dayBlock.querySelector('h3').textContent;
+        let sum = 0;
+        dayBlock.querySelectorAll('.ca-row').forEach(row => {
+          const start = row.querySelector('.start').value;
+          const end = row.querySelector('.end').value;
+          const out = row.querySelector('.duration');
+          let val = 0;
+          if (start && end) {
+            const [sh, sm] = start.split(':').map(Number);
+            const [eh, em] = end.split(':').map(Number);
+            let s = new Date(0,0,0,sh,sm), e = new Date(0,0,0,eh,em);
+            let diff = (e - s) / (1000 * 60 * 60);
+            if (diff < 0) diff += 24;
+            val = parseFloat(diff.toFixed(2));
+            out.textContent = val;
+          } else out.textContent = '0';
+          sum += val;
+        });
+        total += sum;
+        if (sum > 0) workDays++;
+        if (sum > max) { max = sum; maxDay = day; }
+        if (sum < min) { min = sum; minDay = day; }
+        if (sum > 12) warnings.push(`${day}: ${sum} giờ`);
+        labels.push(day);
+        data.push(sum);
+      });
+
+      document.getElementById('total').textContent = 'Tổng số giờ: ' + total.toFixed(2);
+      document.getElementById('maxDay').textContent = `${maxDay} (${max.toFixed(2)} giờ)`;
+      document.getElementById('minDay').textContent = `${minDay} (${min.toFixed(2)} giờ)`;
+      document.getElementById('avgHour').textContent = workDays ? (total / workDays).toFixed(2) : 0;
+      document.getElementById('daysWorked').textContent = workDays;
+      document.getElementById('warning').textContent = warnings.length ? warnings.join(', ') : 'Không có';
+
+      const currentWeek = document.getElementById('week').value || 'tuần hiện tại';
+      const history = JSON.parse(localStorage.getItem('historyStats') || '{}');
+      history[currentWeek] = total;
+      localStorage.setItem('historyStats', JSON.stringify(history));
+
+      const allWeeks = Object.entries(history);
+      document.getElementById('totalWeeks').textContent = allWeeks.length;
+      document.getElementById('grandTotal').textContent = allWeeks.reduce((sum, [k, v]) => sum + Number(v), 0).toFixed(2);
+
+      if (window.barChart) window.barChart.destroy();
+      if (window.pieChart) window.pieChart.destroy();
+      const ctxBar = document.getElementById('barChart').getContext('2d');
+      window.barChart = new Chart(ctxBar, {
+        type: 'bar', data: { labels, datasets: [{ label: 'Giờ làm', data, backgroundColor: '#007BFF' }] },
+        options: { plugins: { title: { display: true, text: 'Biểu đồ cột' } }, scales: { y: { beginAtZero: true } } }
+      });
+      const ctxPie = document.getElementById('pieChart').getContext('2d');
+      window.pieChart = new Chart(ctxPie, {
+        type: 'pie', data: { labels, datasets: [{ data, backgroundColor: ["#007BFF","#28a745","#ffc107","#dc3545","#6f42c1","#fd7e14","#20c997"] }] },
+        options: { plugins: { title: { display: true, text: 'Biểu đồ tròn tỉ lệ giờ làm' } } }
+      });
+    }
+
+    function exportExcel() {
+      let wb = XLSX.utils.book_new();
+      let data = [['Thứ', 'Ca', 'Bắt đầu', 'Kết thúc', 'Giờ']];
+      document.querySelectorAll('.day-block').forEach(block => {
+        const day = block.querySelector('h3').textContent;
+        block.querySelectorAll('.ca-row').forEach((row, i) => {
+          const start = row.querySelector('.start').value;
+          const end = row.querySelector('.end').value;
+          const duration = row.querySelector('.duration').textContent;
+          data.push([day, `Ca ${i+1}`, start, end, duration]);
+        });
+      });
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, 'LichLamViec');
+      XLSX.writeFile(wb, 'lich-lam-viec.xlsx');
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        updateTable();
+      }
+    });
+
+    generateWorkUI();
+  </script>
+</body>
+</html>
